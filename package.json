@@ -9,9 +9,19 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/groq": "^3.0.39",
+    "@ai-sdk/react": "^3.0.180",
+    "ai": "^6.0.178",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.38.0",
+    "fuse.js": "^7.3.0",
+    "lucide-react": "^1.14.0",
     "next": "16.2.6",
+    "pdf-parse": "^1.1.1",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-markdown": "^10.1.0",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
