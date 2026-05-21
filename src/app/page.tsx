@@ -2,10 +2,13 @@
 
 import { useChat } from '@ai-sdk/react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Scale, Shield, BookOpen, MessageSquare, Plus, Trash2 } from 'lucide-react';
+import { Send, Scale, Shield, BookOpen, MessageSquare, Plus } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useState, useRef, useEffect } from 'react';
+import { isLegalTopicQuestion, OFF_TOPIC_MESSAGE } from '@/lib/legal-topic-guard';
 import { cn } from '@/lib/utils';
+
+const SIDEBAR_WIDTH_PX = 260;
 
 export default function LegalRAG() {
   const { messages = [], setMessages, status, sendMessage } = useChat();
@@ -17,12 +20,27 @@ export default function LegalRAG() {
     setInput(e.target.value);
   };
 
+  const appendOffTopicReply = (userText: string) => {
+    const userId = crypto.randomUUID();
+    const assistantId = crypto.randomUUID();
+    setMessages([
+      ...messages,
+      { id: userId, role: 'user', parts: [{ type: 'text', text: userText }] },
+      { id: assistantId, role: 'assistant', parts: [{ type: 'text', text: OFF_TOPIC_MESSAGE }] },
+    ]);
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!input.trim() || isLoading) return;
 
-    const currentInput = input;
+    const currentInput = input.trim();
     setInput('');
+
+    if (!isLegalTopicQuestion(currentInput)) {
+      appendOffTopicReply(currentInput);
+      return;
+    }
 
     try {
       await sendMessage({ text: currentInput });
@@ -45,26 +63,26 @@ export default function LegalRAG() {
     <div className="flex h-screen bg-[#020617] text-slate-200 overflow-hidden font-sans">
       {/* Sidebar */}
       <motion.aside
-        initial={{ x: -300 }}
-        animate={{ x: isSidebarOpen ? 0 : -300 }}
+        initial={{ x: -SIDEBAR_WIDTH_PX }}
+        animate={{ x: isSidebarOpen ? 0 : -SIDEBAR_WIDTH_PX }}
         className={cn(
-          "fixed md:relative z-20 w-72 h-full bg-[#0f172a] border-r border-slate-800 flex flex-col transition-all duration-300",
-          !isSidebarOpen && "md:w-0 overflow-hidden"
+          "fixed md:relative z-20 shrink-0 h-full bg-[#0f172a] border-r border-slate-800 flex flex-col transition-all duration-300",
+          isSidebarOpen ? "w-[260px]" : "w-[260px] md:w-0 md:overflow-hidden md:border-r-0"
         )}
       >
-        <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-900/20">
-              <Scale className="text-white w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="font-bold text-lg tracking-tight text-white">JustElligence</h1>
-              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Legal AI RAG</p>
-            </div>
-          </div>
+        <div className="px-4 py-5 border-b border-slate-800">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/justelligence-logo.png?v=2"
+            alt="Justelligence"
+            className="h-10 w-full object-contain object-left"
+          />
+          <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider mt-2 pl-0.5">
+            Legal AI RAG
+          </p>
         </div>
 
-        <div className="flex-1 p-4 flex flex-col gap-2 overflow-y-auto">
+        <div className="flex-1 px-3 py-4 flex flex-col gap-2 overflow-y-auto">
           <button
             onClick={clearChat}
             className="flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-800/50 hover:bg-slate-800 text-slate-300 hover:text-white transition-all group"
@@ -83,8 +101,8 @@ export default function LegalRAG() {
           </div>
         </div>
 
-        <div className="p-6 border-t border-slate-800">
-          <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-900/50 border border-slate-800">
+        <div className="px-3 py-4 border-t border-slate-800">
+          <div className="flex items-center gap-3 p-2.5 rounded-2xl bg-slate-900/50 border border-slate-800">
             <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center overflow-hidden">
               <img src="https://ui-avatars.com/api/?name=Law+Expert&background=1e293b&color=fff" alt="User" />
             </div>
@@ -127,13 +145,21 @@ export default function LegalRAG() {
           className="flex-1 overflow-y-auto p-6 md:p-12 space-y-8 scroll-smooth"
         >
           {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center max-w-2xl mx-auto">
-              <div className="w-20 h-20 rounded-3xl bg-blue-600/20 flex items-center justify-center mb-8 animate-bounce-slow">
-                <Scale className="w-10 h-10 text-blue-500" />
+            <div className="h-full flex flex-col items-center justify-center text-center max-w-3xl mx-auto">
+              <div className="w-full max-w-2xl mb-10 px-4">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/justelligence-logo.png?v=2"
+                  alt="Justelligence — Pakistan Legal Intelligence"
+                  className="w-full h-auto object-contain"
+                />
               </div>
               <h3 className="text-3xl font-bold text-white mb-4 tracking-tight">How can I assist your legal research?</h3>
-              <p className="text-slate-400 leading-relaxed text-lg mb-10">
+              <p className="text-slate-400 leading-relaxed text-lg mb-4">
                 Access a specialized RAG-powered intelligence system trained on Pakistani case law, civil servant regulations, and supreme court judgments.
+              </p>
+              <p className="text-slate-500 text-sm mb-10 max-w-xl">
+                I answer <span className="text-blue-400 font-medium">law, court, and legal</span> questions only. Off-topic questions are not processed.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
                 <SuggestionCard
@@ -234,7 +260,7 @@ export default function LegalRAG() {
               </button>
             </div>
             <p className="text-[10px] text-center mt-4 text-slate-600 font-medium uppercase tracking-widest">
-              Powered by M Hassan Ashraf
+              Powered by Llama 3.3 & RAG
             </p>
           </form>
         </div>

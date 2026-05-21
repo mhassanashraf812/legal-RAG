@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "JustElligence | Pakistan Legal RAG",
+  title: "Justelligence | Pakistan Legal RAG",
   description: "Specialized Retrieval-Augmented Generation for Pakistani Law",
 };
 

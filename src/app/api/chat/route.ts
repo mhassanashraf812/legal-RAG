@@ -1,6 +1,10 @@
 import { createGroq } from '@ai-sdk/groq';
 import { streamText } from 'ai';
-import { searchPPC } from '@/lib/ppc-search';
+import { createOffTopicStreamResponse } from '@/lib/chat-rejection-response';
+import { OFF_TOPIC_MESSAGE } from '@/lib/legal-topic-guard';
+import { validateLegalTopic } from '@/lib/legal-topic-guard.server';
+import { assessRagCoverage, searchPPC } from '@/lib/ppc-search';
+import { buildRagInstructions } from '@/lib/rag-prompt';
 
 const groq = createGroq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -26,25 +30,36 @@ export async function POST(req: Request) {
             .join('')
         : '';
 
+    const isLegal = await validateLegalTopic(userQuery);
+    if (!isLegal) {
+      return createOffTopicStreamResponse(OFF_TOPIC_MESSAGE, messages);
+    }
+
     // 1. Retrieve relevant PPC sections using Fuse.js
     const results = searchPPC(userQuery, 5);
-    const context = results.length > 0
-      ? results.map((r) => `[Pakistan Penal Code — Page ~${r.page}]\n${r.text}`).join('\n\n---\n\n')
-      : 'No specific sections found. Answer based on general knowledge of Pakistani law.';
+    const coverage = assessRagCoverage(userQuery, results);
+    const ragInstructions = buildRagInstructions(coverage);
+
+    const context =
+      results.length > 0
+        ? results
+            .map((r) => `[Pakistan Penal Code — Page ~${r.page}]\n${r.text}`)
+            .join('\n\n---\n\n')
+        : '(No matching passages retrieved from the PPC document.)';
 
     // 2. Build system prompt with retrieved context
-    const systemPrompt = `You are a specialized Legal AI Assistant for the Pakistan Penal Code (PPC).
-Your goal is to provide accurate, professional legal information based on the provided context.
+    const systemPrompt = `You are Justelligence, a specialized Legal AI Assistant for the Pakistan Penal Code (PPC).
 
-Context from Pakistan Penal Code:
+${ragInstructions}
+
+Retrieved context from PPC knowledge base:
 ${context}
 
-Instructions:
-- Use the provided context to answer the user's question.
-- Cite the approximate page number when referencing sections.
-- If the query is outside the provided data, answer generally but state that clearly.
-- Maintain a formal, authoritative, yet helpful legal tone.
-- Format your response using Markdown for clarity.`;
+Additional instructions:
+- Only answer questions related to law, courts, legal procedure, statutes, or regulations.
+- If the user asks about non-legal topics, politely refuse.
+- Maintain a formal, helpful legal tone.
+- Format your response using Markdown.`;
 
     // 3. Convert UIMessages to CoreMessages
     const coreMessages = messages.map((m: any) => ({
