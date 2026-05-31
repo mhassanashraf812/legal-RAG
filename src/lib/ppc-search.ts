@@ -9,7 +9,43 @@ type PPCChunk = {
   source: string;
 };
 
-// Load chunks at module init time (server-side only)
+const STOP_WORDS = new Set([
+  'what', 'is', 'are', 'the', 'for', 'under', 'about', 'explain', 'define',
+  'punishment', 'penal', 'code', 'ppc', 'pakistan', 'tell', 'me', 'how',
+  'does', 'mean', 'meaning', 'of', 'a', 'an', 'and', 'or', 'in', 'to',
+]);
+
+/** Common PPC offence topics → primary section numbers */
+const PPC_TOPIC_SECTIONS: Record<string, number[]> = {
+  'qatl-i-amd': [302, 300, 301],
+  'qatl-e-amd': [302, 300, 301],
+  'qatl i amd': [302, 300, 301],
+  murder: [302, 300, 301],
+  'culpable homicide': [299, 300, 304],
+  theft: [378, 379, 380, 381],
+  'criminal breach of trust': [405, 406, 407, 408],
+  'breach of trust': [405, 406, 407, 408],
+  kidnapping: [359, 360],
+  kidnap: [359, 360],
+  abduction: [362, 363, 364, 365],
+  extortion: [383, 384, 385, 386],
+  robbery: [390, 391, 392, 393, 394],
+  cheating: [415, 416, 417, 418, 419, 420],
+  'wrongful confinement': [340, 342],
+  confinement: [340, 342],
+  'criminal intimidation': [503, 506],
+  intimidation: [503, 506],
+  assault: [351, 352, 353],
+  hurt: [332, 333, 334, 335, 336, 337],
+  'grievous hurt': [334, 335, 336, 337],
+  forgery: [463, 464, 465, 466, 467],
+  rape: [375, 376],
+  fraud: [415, 420, 421, 422, 423, 424, 425, 426],
+  mischief: [425, 426, 427, 428, 440],
+  defamation: [499, 500],
+  qatl: [300, 301, 302],
+};
+
 function loadChunks(): PPCChunk[] {
   try {
     const filePath = join(process.cwd(), 'src', 'data', 'ppc-chunks.json');
@@ -25,16 +61,14 @@ function loadChunks(): PPCChunk[] {
 
 const chunks = loadChunks();
 
-// Fuse.js index for fuzzy search
 const fuse = new Fuse(chunks, {
   keys: ['text'],
-  threshold: 0.6,
+  threshold: 0.45,
   includeScore: true,
   ignoreLocation: true,
-  minMatchCharLength: 3,
+  minMatchCharLength: 2,
 });
 
-/** Extract any section numbers mentioned in the query */
 function extractSectionNumbers(query: string): number[] {
   const found = new Set<number>();
   const patterns = [
@@ -55,54 +89,123 @@ function extractSectionNumbers(query: string): number[] {
   return [...found];
 }
 
-/** PPC sections that exist in the ingested document (typical PPC range) */
 function extractPpcSectionNumbers(query: string): number[] {
   return extractSectionNumbers(query).filter((n) => n >= 1 && n <= 511);
 }
 
-/** Find chunks that contain the start of a given PPC section (e.g. "302. Punishment") */
-function searchBySectionNumber(sectionNum: number, topK: number): typeof chunks {
+function normalizeQuery(query: string): string {
+  return query
+    .toLowerCase()
+    .replace(/[?]/g, '')
+    .replace(/\s+ppc\s*$/i, '')
+    .replace(/^(what is|what are|explain|define|tell me about|punishment for|punishment of)\s+/i, '')
+    .replace(/\s+under\s+(?:section\s+)?\d{1,4}\s*$/i, '')
+    .trim();
+}
+
+function extractOffenceTopic(query: string): string | null {
+  const cleaned = normalizeQuery(query);
+  const keys = Object.keys(PPC_TOPIC_SECTIONS).sort((a, b) => b.length - a.length);
+  for (const key of keys) {
+    if (cleaned.includes(key)) return key;
+  }
+  return null;
+}
+
+export function extractSearchTerms(query: string): string[] {
+  const normalized = query.toLowerCase().replace(/[^\w\s-]/g, ' ');
+  const terms = normalized.split(/\s+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+
+  const topic = extractOffenceTopic(query);
+  if (topic) {
+    for (const part of topic.split(/[\s-]+/)) {
+      if (part.length > 2 && !terms.includes(part)) terms.push(part);
+    }
+  }
+
+  return [...new Set(terms)];
+}
+
+function searchBySectionNumber(
+  sectionNum: number,
+  topK: number,
+  topicHint?: string
+): PPCChunk[] {
   const sectionStart = new RegExp(`\\b${sectionNum}\\.\\s+\\S`, 'i');
   const sectionMention = new RegExp(`\\bSection\\s+${sectionNum}\\b`, 'i');
 
-  const matched = chunks.filter(
+  let matched = chunks.filter(
     (c) => sectionStart.test(c.text) || sectionMention.test(c.text)
   );
 
-  // Prefer chunks where the section heading appears early in the text
+  if (topicHint) {
+    const topicRe = new RegExp(
+      `\\b${sectionNum}\\.\\s+[^\\n]{0,80}${topicHint.replace(/-/g, '[\\s-]')}`,
+      'i'
+    );
+    const preferred = matched.filter((c) => topicRe.test(c.text));
+    if (preferred.length > 0) matched = preferred;
+  }
+
   return matched
     .sort((a, b) => {
       const aIdx = a.text.search(sectionStart);
       const bIdx = b.text.search(sectionStart);
-      const aScore = aIdx >= 0 ? aIdx : 9999;
-      const bScore = bIdx >= 0 ? bIdx : 9999;
-      return aScore - bScore;
+      return (aIdx >= 0 ? aIdx : 9999) - (bIdx >= 0 ? bIdx : 9999);
     })
     .slice(0, topK);
 }
 
-/**
- * Simple keyword search fallback — searches for query words directly in chunk text.
- */
-function keywordSearch(query: string, topK: number): typeof chunks {
-  const words = query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => w.length > 3 || /^\d{1,4}$/.test(w));
-  if (words.length === 0) return [];
+function searchByOffenceTopic(topic: string, topK: number): PPCChunk[] {
+  const sections = PPC_TOPIC_SECTIONS[topic];
+  if (!sections) return [];
 
-  // Score each chunk by how many query words appear
+  const primary = sections.slice(0, 2);
+  const found = primary.flatMap((n) => searchBySectionNumber(n, 2, topic));
+  return [...new Map(found.map((c) => [c.id, c])).values()].slice(0, topK);
+}
+
+function keywordSearch(query: string, topK: number): PPCChunk[] {
+  const terms = extractSearchTerms(query);
+  if (terms.length === 0) return [];
+
   const scored = chunks.map((chunk) => {
     const lower = chunk.text.toLowerCase();
-    const matchCount = words.filter((w) => lower.includes(w)).length;
-    return { chunk, matchCount };
+    let score = 0;
+    for (const term of terms) {
+      if (lower.includes(term)) score += term.length > 5 ? 2 : 1;
+    }
+    return { chunk, score };
   });
 
   return scored
-    .filter((s) => s.matchCount > 0)
-    .sort((a, b) => b.matchCount - a.matchCount)
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
     .slice(0, topK)
     .map((s) => s.chunk);
+}
+
+function chunkToResult(item: PPCChunk, score: number): PPCSearchResult {
+  return {
+    id: item.id,
+    text: item.text,
+    page: item.page,
+    source: item.source,
+    score,
+  };
+}
+
+function mergeResults(lists: PPCSearchResult[], topK: number): PPCSearchResult[] {
+  const map = new Map<string, PPCSearchResult>();
+  for (const r of lists) {
+    const existing = map.get(r.id);
+    if (!existing || r.score < existing.score) {
+      map.set(r.id, r);
+    }
+  }
+  return [...map.values()]
+    .sort((a, b) => a.score - b.score)
+    .slice(0, topK);
 }
 
 export type PPCSearchResult = {
@@ -119,7 +222,15 @@ export type RagCoverage = {
   requestedSections?: number[];
 };
 
-/** Whether retrieved chunks actually answer the query from the PPC RAG book */
+function resultsMatchQueryTerms(query: string, results: PPCSearchResult[]): boolean {
+  const terms = extractSearchTerms(query);
+  if (terms.length === 0) return results.length > 0;
+
+  const combined = results.map((r) => r.text.toLowerCase()).join(' ');
+  const hits = terms.filter((t) => combined.includes(t));
+  return hits.length >= 1;
+}
+
 export function assessRagCoverage(
   query: string,
   results: PPCSearchResult[]
@@ -144,18 +255,25 @@ export function assessRagCoverage(
     return { inBook: false, reason: 'no_results' };
   }
 
-  const hasStrongMatch = results.some((r) => r.score === 0 || r.score < 0.38);
-  if (!hasStrongMatch) {
-    return { inBook: false, reason: 'weak_match' };
+  if (results.some((r) => r.score === 0)) {
+    return { inBook: true, reason: 'found' };
   }
 
-  return { inBook: true, reason: 'found' };
+  if (resultsMatchQueryTerms(query, results)) {
+    return { inBook: true, reason: 'found' };
+  }
+
+  const hasReasonableFuse = results.some((r) => r.score < 0.55);
+  if (hasReasonableFuse) {
+    return { inBook: true, reason: 'found' };
+  }
+
+  return { inBook: false, reason: 'weak_match' };
 }
 
 export function searchPPC(query: string, topK = 5): PPCSearchResult[] {
   if (!query?.trim()) return [];
 
-  // 0. Direct section lookup when user asks about a specific PPC section number
   const mentionedSections = extractSectionNumbers(query);
   const ppcSectionNums = extractPpcSectionNumbers(query);
 
@@ -163,48 +281,35 @@ export function searchPPC(query: string, topK = 5): PPCSearchResult[] {
     const sectionResults = ppcSectionNums.flatMap((n) => searchBySectionNumber(n, topK));
     const unique = [...new Map(sectionResults.map((c) => [c.id, c])).values()];
     if (unique.length > 0) {
-      console.log(
-        `[PPC Search] Section lookup ${ppcSectionNums.join(', ')} → ${unique.length} results`
-      );
-      return unique.slice(0, topK).map((item) => ({
-        id: item.id,
-        text: item.text,
-        page: item.page,
-        source: item.source,
-        score: 0,
-      }));
+      return unique.slice(0, topK).map((item) => chunkToResult(item, 0));
     }
-
-    // Section number asked but not in PPC book — skip fuzzy fallback
-    console.log(
-      `[PPC Search] Section(s) ${mentionedSections.join(', ')} not found in PPC document`
-    );
-    return [];
+    if (ppcSectionNums.length > 0) return [];
   }
 
-  // 1. Try Fuse.js fuzzy search first
-  let results = fuse.search(query, { limit: topK });
-  console.log(`[PPC Search] Fuse query: "${query}" → ${results.length} results`);
+  const collected: PPCSearchResult[] = [];
 
-  // 2. Fallback to simple keyword search if Fuse finds nothing
-  if (results.length === 0) {
-    console.log('[PPC Search] Falling back to keyword search...');
-    const kwResults = keywordSearch(query, topK);
-    console.log(`[PPC Search] Keyword search → ${kwResults.length} results`);
-    return kwResults.map((item) => ({
-      id: item.id,
-      text: item.text,
-      page: item.page,
-      source: item.source,
-      score: 0.5,
-    }));
+  const topic = extractOffenceTopic(query);
+  if (topic) {
+    const topicChunks = searchByOffenceTopic(topic, topK);
+    collected.push(...topicChunks.map((c) => chunkToResult(c, 0)));
+    console.log(`[PPC Search] Topic "${topic}" → ${topicChunks.length} section hits`);
   }
 
-  return results.map((r) => ({
-    id: r.item.id,
-    text: r.item.text,
-    page: r.item.page,
-    source: r.item.source,
-    score: r.score ?? 1,
-  }));
+  const fuseResults = fuse.search(query, { limit: topK });
+  collected.push(
+    ...fuseResults.map((r) => chunkToResult(r.item, r.score ?? 1))
+  );
+
+  const cleaned = normalizeQuery(query);
+  if (cleaned && cleaned !== query.toLowerCase()) {
+    const topicFuse = fuse.search(cleaned, { limit: topK });
+    collected.push(...topicFuse.map((r) => chunkToResult(r.item, r.score ?? 1)));
+  }
+
+  const kwResults = keywordSearch(query, topK);
+  collected.push(...kwResults.map((c) => chunkToResult(c, 0.35)));
+
+  const merged = mergeResults(collected, topK);
+  console.log(`[PPC Search] Query: "${query}" → ${merged.length} results (top score: ${merged[0]?.score ?? 'n/a'})`);
+  return merged;
 }

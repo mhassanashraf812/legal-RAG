@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Justelligence | Pakistan Legal RAG",
-  description: "Specialized Retrieval-Augmented Generation for Pakistani Law",
+  title: "Justelligence | Citation-Grounded Legal AI (PPC)",
+  description:
+    "Research prototype: Retrieval-Augmented Generation on the Pakistan Penal Code to reduce citation hallucinations.",
 };
 
 export default function RootLayout({

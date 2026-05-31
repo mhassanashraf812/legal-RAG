@@ -1,302 +1,354 @@
 'use client';
 
 import { useChat } from '@ai-sdk/react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Scale, Shield, BookOpen, MessageSquare, Plus } from 'lucide-react';
+import { ChevronDown, RotateCcw, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { useState, useRef, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { isLegalTopicQuestion, OFF_TOPIC_MESSAGE } from '@/lib/legal-topic-guard';
+import { extractCitationBadges } from '@/lib/ppc-sources';
 import { cn } from '@/lib/utils';
+import type { PpcSource } from '@/types/ppc';
 
-const SIDEBAR_WIDTH_PX = 260;
+const FEATURE_CARDS = [
+  {
+    title: 'Retrieve Relevant PPC Sections',
+    description:
+      'Semantic search over the Pakistan Penal Code corpus to surface passages related to your query.',
+  },
+  {
+    title: 'Verify Legal Citations',
+    description:
+      'Section numbers and page references are tied to retrieved text to reduce citation hallucinations.',
+  },
+  {
+    title: 'Generate Grounded Responses',
+    description:
+      'The language model answers only from retrieved PPC context, with explicit source attribution.',
+  },
+];
 
-export default function LegalRAG() {
-  const { messages = [], setMessages, status, sendMessage } = useChat();
+const EXAMPLE_QUESTIONS = [
+  'What is the punishment under Section 302 PPC?',
+  'Explain theft under Section 378 PPC.',
+  'What constitutes qatl-i-amd?',
+];
+
+export default function JustelligencePage() {
+  const pendingSources = useRef<PpcSource[]>([]);
+  const [sourcesByMessageId, setSourcesByMessageId] = useState<Record<string, PpcSource[]>>({});
   const [input, setInput] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const { messages = [], setMessages, status, sendMessage } = useChat({
+    onData: (part) => {
+      if (part.type === 'data-sources' && Array.isArray(part.data)) {
+        pendingSources.current = part.data as PpcSource[];
+      }
+    },
+    onFinish: ({ message }) => {
+      if (message.role === 'assistant' && pendingSources.current.length > 0) {
+        setSourcesByMessageId((prev) => ({
+          ...prev,
+          [message.id]: pendingSources.current,
+        }));
+        pendingSources.current = [];
+      }
+    },
+  });
 
   const isLoading = status === 'submitted' || status === 'streaming';
+  const hasChat = messages.length > 0;
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement> | React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
-  };
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, isLoading]);
 
-  const appendOffTopicReply = (userText: string) => {
-    const userId = crypto.randomUUID();
-    const assistantId = crypto.randomUUID();
-    setMessages([
-      ...messages,
-      { id: userId, role: 'user', parts: [{ type: 'text', text: userText }] },
-      { id: assistantId, role: 'assistant', parts: [{ type: 'text', text: OFF_TOPIC_MESSAGE }] },
-    ]);
-  };
+  const submitQuery = useCallback(
+    async (text: string) => {
+      const query = text.trim();
+      if (!query || isLoading) return;
+
+      if (!isLegalTopicQuestion(query)) {
+        setMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: query }] },
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            parts: [{ type: 'text', text: OFF_TOPIC_MESSAGE }],
+          },
+        ]);
+        return;
+      }
+
+      await sendMessage({ text: query });
+    },
+    [isLoading, sendMessage, setMessages]
+  );
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!input.trim() || isLoading) return;
-
-    const currentInput = input.trim();
+    const query = input.trim();
+    if (!query) return;
     setInput('');
-
-    if (!isLegalTopicQuestion(currentInput)) {
-      appendOffTopicReply(currentInput);
-      return;
-    }
-
-    try {
-      await sendMessage({ text: currentInput });
-    } catch (err) {
-      console.error('Failed to send message:', err);
-    }
+    await submitQuery(query);
   };
-  const [isSidebarOpen, setSidebarOpen] = useState(true);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
+  const clearSession = () => {
+    setMessages([]);
+    setSourcesByMessageId({});
+    pendingSources.current = [];
+  };
 
-  const clearChat = () => setMessages([]);
+  const messageText = (m: (typeof messages)[0]) =>
+    (m.parts || [])
+      .filter((part) => part.type === 'text')
+      .map((part) => ('text' in part ? part.text : ''))
+      .join('') || '';
 
   return (
-    <div className="flex h-screen bg-[#020617] text-slate-200 overflow-hidden font-sans">
-      {/* Sidebar */}
-      <motion.aside
-        initial={{ x: -SIDEBAR_WIDTH_PX }}
-        animate={{ x: isSidebarOpen ? 0 : -SIDEBAR_WIDTH_PX }}
-        className={cn(
-          "fixed md:relative z-20 shrink-0 h-full bg-[#0f172a] border-r border-slate-800 flex flex-col transition-all duration-300",
-          isSidebarOpen ? "w-[260px]" : "w-[260px] md:w-0 md:overflow-hidden md:border-r-0"
-        )}
-      >
-        <div className="px-4 py-5 border-b border-slate-800">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/justelligence-logo.png?v=2"
-            alt="Justelligence"
-            className="h-10 w-full object-contain object-left"
-          />
-          <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider mt-2 pl-0.5">
-            Legal AI RAG
-          </p>
-        </div>
-
-        <div className="flex-1 px-3 py-4 flex flex-col gap-2 overflow-y-auto">
-          <button
-            onClick={clearChat}
-            className="flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-800/50 hover:bg-slate-800 text-slate-300 hover:text-white transition-all group"
-          >
-            <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform" />
-            <span className="font-medium text-sm">New Consultation</span>
-          </button>
-
-          <div className="mt-8">
-            <p className="px-4 text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mb-4">Knowledge Base</p>
-            <div className="flex flex-col gap-1">
-              <KnowledgeItem icon={<BookOpen className="w-4 h-4" />} title="Case Law Archive" active />
-              <KnowledgeItem icon={<Shield className="w-4 h-4" />} title="Statutory Provisions" />
-              <KnowledgeItem icon={<MessageSquare className="w-4 h-4" />} title="Legal Precedents" />
-            </div>
-          </div>
-        </div>
-
-        <div className="px-3 py-4 border-t border-slate-800">
-          <div className="flex items-center gap-3 p-2.5 rounded-2xl bg-slate-900/50 border border-slate-800">
-            <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center overflow-hidden">
-              <img src="https://ui-avatars.com/api/?name=Law+Expert&background=1e293b&color=fff" alt="User" />
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <p className="text-xs font-bold text-white truncate">Advocate Pro</p>
-              <p className="text-[10px] text-slate-500 truncate">Premium Member</p>
-            </div>
-          </div>
-        </div>
-      </motion.aside>
-
-      {/* Main Chat Area */}
-      <main className="flex-1 flex flex-col relative bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-[#020617] to-[#020617]">
-        {/* Header */}
-        <header className="h-20 border-b border-slate-800/50 flex items-center justify-between px-8 backdrop-blur-md bg-slate-900/10 sticky top-0 z-10">
-          <div className="flex items-center gap-4">
+    <div className="flex h-dvh flex-col bg-[#F8FAFC] text-[#0B1220]">
+      <header className="glass-bar shrink-0 border-b border-slate-200/80">
+        <div className="relative mx-auto flex h-14 max-w-3xl items-center justify-center px-4 sm:px-6">
+          <BrandWordmark />
+          {hasChat && (
             <button
-              onClick={() => setSidebarOpen(!isSidebarOpen)}
-              className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400"
+              type="button"
+              onClick={clearSession}
+              className="absolute right-4 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 sm:right-6"
             >
-              <Plus className={cn("w-5 h-5 transition-transform", isSidebarOpen ? "rotate-45" : "rotate-0")} />
+              <RotateCcw className="h-3.5 w-3.5" />
+              New session
             </button>
-            <div className="h-4 w-[1px] bg-slate-800" />
-            <h2 className="text-sm font-semibold text-slate-400 flex items-center gap-2">
-              <Shield className="w-4 h-4 text-blue-500" />
-              Pakistan Legal Intelligence
-            </h2>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-[10px] font-bold text-blue-400 uppercase tracking-widest animate-pulse">
-              System Live
-            </div>
-          </div>
-        </header>
-
-        {/* Messages */}
-        <div
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto p-6 md:p-12 space-y-8 scroll-smooth"
-        >
-          {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center max-w-3xl mx-auto">
-              <div className="w-full max-w-2xl mb-10 px-4">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/justelligence-logo.png?v=2"
-                  alt="Justelligence — Pakistan Legal Intelligence"
-                  className="w-full h-auto object-contain"
-                />
-              </div>
-              <h3 className="text-3xl font-bold text-white mb-4 tracking-tight">How can I assist your legal research?</h3>
-              <p className="text-slate-400 leading-relaxed text-lg mb-4">
-                Access a specialized RAG-powered intelligence system trained on Pakistani case law, civil servant regulations, and supreme court judgments.
-              </p>
-              <p className="text-slate-500 text-sm mb-10 max-w-xl">
-                I answer <span className="text-blue-400 font-medium">law, court, and legal</span> questions only. Off-topic questions are not processed.
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-                <SuggestionCard
-                  title="Service Law Inquiry"
-                  desc="What are the criteria for induction into the Secretariat Group?"
-                  onClick={() => setInput('What are the criteria for induction into the Secretariat Group?')}
-                />
-                <SuggestionCard
-                  title="Jurisdictional Check"
-                  desc="Does the High Court have jurisdiction over service matters under Article 212?"
-                  onClick={() => setInput('Does the High Court have jurisdiction over service matters under Article 212?')}
-                />
-              </div>
-            </div>
-          ) : (
-            <AnimatePresence initial={false}>
-              {messages.map((m, i) => (
-                <motion.div
-                  key={m.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={cn(
-                    "flex w-full",
-                    m.role === 'user' ? "justify-end" : "justify-start"
-                  )}
-                >
-                  <div className={cn(
-                    "relative group max-w-[85%] md:max-w-[70%]",
-                    m.role === 'user' ? "flex flex-col items-end" : "flex gap-4"
-                  )}>
-                    {m.role !== 'user' && (
-                      <div className="w-8 h-8 rounded-lg bg-blue-600 flex-shrink-0 flex items-center justify-center mt-1">
-                        <Scale className="w-4 h-4 text-white" />
-                      </div>
-                    )}
-
-                    <div className={cn(
-                      "px-6 py-4 rounded-3xl text-sm leading-relaxed",
-                      m.role === 'user'
-                        ? "bg-blue-600 text-white shadow-xl shadow-blue-600/20"
-                        : "bg-slate-800/50 border border-slate-700/50 text-slate-200 backdrop-blur-sm"
-                    )}>
-                      <div className="prose prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-slate-900 prose-pre:border prose-pre:border-slate-800">
-                        <ReactMarkdown>
-                          {(m.parts || [])
-                            .filter(part => part.type === 'text')
-                            .map(part => (part as any).text)
-                            .join('') || (m as any).content || ''}
-                        </ReactMarkdown>
-                      </div>
-
-                      {m.role === 'user' && (
-                        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-2 mr-2">You</span>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-              {isLoading && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex gap-4">
-                  <div className="w-8 h-8 rounded-lg bg-blue-600 flex-shrink-0 flex items-center justify-center mt-1 animate-pulse">
-                    <Scale className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="px-6 py-4 rounded-3xl bg-slate-800/50 border border-slate-700/50 text-slate-400 flex items-center gap-2">
-                    <span className="flex gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce [animation-delay:-0.3s]"></span>
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce [animation-delay:-0.15s]"></span>
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-bounce"></span>
-                    </span>
-                    <span className="text-xs font-medium italic">Analyzing knowledge base...</span>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           )}
         </div>
+      </header>
 
-        {/* Input Area */}
-        <div className="p-6 md:p-10 bg-gradient-to-t from-[#020617] via-[#020617] to-transparent">
-          <form
-            onSubmit={handleSubmit}
-            className="max-w-4xl mx-auto relative group"
-          >
-            <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-[2rem] blur opacity-25 group-focus-within:opacity-50 transition duration-1000 group-focus-within:duration-200"></div>
-            <div className="relative flex items-center bg-slate-900 border border-slate-800 rounded-[1.8rem] p-2 pr-4 shadow-2xl">
-              <input
+      <div ref={scrollRef} className="scroll-area flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
+          {!hasChat ? (
+            <div className="animate-fade-in py-10 sm:py-14">
+              <section className="mx-auto max-w-2xl text-center">
+                <p className="mb-5 inline-flex rounded-full border border-[#3B82F6]/25 bg-white px-3 py-1 text-[11px] font-medium tracking-wide text-[#3B82F6]">
+                  Retrieval-Augmented Generation (RAG)
+                </p>
+
+                <h1 className="text-2xl font-semibold leading-snug tracking-tight text-[#0B1220] sm:text-[1.75rem] sm:leading-tight">
+                  Citation-Grounded Legal AI for the Pakistan Penal Code
+                </h1>
+
+                <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-slate-600 sm:text-[15px]">
+                  A research prototype designed to reduce citation hallucinations through
+                  retrieval-based grounding and citation verification.
+                </p>
+
+                <form onSubmit={handleSubmit} className="mt-8">
+                  <div className="research-input flex flex-col rounded-2xl border border-slate-200 bg-white p-2 transition-shadow sm:p-2.5">
+                    <textarea
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSubmit();
+                        }
+                      }}
+                      rows={2}
+                      placeholder="Ask a question about the Pakistan Penal Code…"
+                      className="min-h-[52px] resize-none bg-transparent px-3 py-2.5 text-sm text-[#0B1220] placeholder:text-slate-400 focus:outline-none sm:text-[15px]"
+                    />
+                    <div className="flex justify-end px-1 pb-1">
+                      <button
+                        type="submit"
+                        disabled={isLoading || !input.trim()}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#3B82F6] text-white transition-colors hover:bg-[#2563eb] disabled:opacity-40"
+                        aria-label="Send"
+                      >
+                        <Send className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </section>
+
+              <section className="mt-14 grid gap-4 sm:grid-cols-3">
+                {FEATURE_CARDS.map((card) => (
+                  <div key={card.title} className="research-card rounded-xl p-5">
+                    <h3 className="text-sm font-semibold text-[#0B1220]">{card.title}</h3>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-500">{card.description}</p>
+                  </div>
+                ))}
+              </section>
+
+              <section className="mt-12 border-t border-slate-200/80 pt-10">
+                <p className="mb-4 text-center text-xs font-medium uppercase tracking-wider text-slate-400">
+                  Example questions
+                </p>
+                <div className="flex flex-col gap-2">
+                  {EXAMPLE_QUESTIONS.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => {
+                        setInput(q);
+                        void submitQuery(q);
+                      }}
+                      className="research-card rounded-xl px-4 py-3 text-left text-sm text-slate-600 transition-colors hover:border-[#3B82F6]/30 hover:text-[#0B1220]"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </div>
+          ) : (
+            <ul className="space-y-8 py-6 sm:py-8">
+              {messages.map((m) => (
+                <li key={m.id} className="animate-fade-in">
+                  {m.role === 'user' ? (
+                    <div className="flex justify-end">
+                      <div className="max-w-[90%] rounded-2xl rounded-tr-sm bg-[#0B1220] px-4 py-3 text-sm leading-relaxed text-white sm:max-w-[85%]">
+                        {messageText(m)}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {sourcesByMessageId[m.id]?.length > 0 && (
+                        <RetrievedSourcesPanel sources={sourcesByMessageId[m.id]} />
+                      )}
+
+                      {(() => {
+                        const text = messageText(m);
+                        const badges = extractCitationBadges(text);
+                        return badges.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {badges.map((b) => (
+                              <span
+                                key={`${m.id}-${b}`}
+                                className="rounded-md border border-[#3B82F6]/20 bg-[#3B82F6]/8 px-2 py-0.5 text-[11px] font-medium text-[#3B82F6]"
+                              >
+                                {b}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null;
+                      })()}
+
+                      <div className="research-card max-w-full rounded-2xl rounded-tl-sm px-4 py-4 sm:max-w-[95%]">
+                        <div className="prose prose-sm max-w-none text-slate-700 prose-headings:text-[#0B1220] prose-strong:text-[#0B1220] prose-blockquote:border-[#3B82F6]/30">
+                          <ReactMarkdown>{messageText(m)}</ReactMarkdown>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              ))}
+
+              {isLoading && (
+                <li className="animate-fade-in space-y-3">
+                  <div className="research-card inline-flex items-center gap-2.5 rounded-2xl px-4 py-3">
+                    <span className="flex gap-1">
+                      <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[#3B82F6]" />
+                      <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[#3B82F6]" />
+                      <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[#3B82F6]" />
+                    </span>
+                    <span className="text-sm text-slate-500">Retrieving PPC sections…</span>
+                  </div>
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {hasChat && (
+        <footer className="glass-bar shrink-0 border-t border-slate-200/80 pb-[env(safe-area-inset-bottom)]">
+          <form onSubmit={handleSubmit} className="mx-auto max-w-3xl px-4 py-4 sm:px-6">
+            <div className="research-input flex items-end gap-2 rounded-2xl border border-slate-200 bg-white p-2 transition-shadow">
+              <textarea
                 value={input}
-                onChange={handleInputChange}
-                placeholder="Ask about Pakistani law, cases, or service regulations..."
-                className="flex-1 bg-transparent border-none focus:ring-0 text-white px-6 py-3 placeholder:text-slate-500 text-sm"
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
+                rows={1}
+                placeholder="Ask about the Pakistan Penal Code…"
+                className="max-h-32 min-h-[44px] flex-1 resize-none bg-transparent px-3 py-2.5 text-sm focus:outline-none"
               />
               <button
                 type="submit"
-                disabled={isLoading || !input || !input.trim()}
-                className="w-12 h-12 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 flex items-center justify-center transition-all shadow-lg shadow-blue-600/20 group/btn"
+                disabled={isLoading || !input.trim()}
+                className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#3B82F6] text-white hover:bg-[#2563eb] disabled:opacity-40"
               >
-                <Send className="w-5 h-5 text-white group-hover/btn:translate-x-1 group-hover/btn:-translate-y-1 transition-transform" />
+                <Send className="h-4 w-4" />
               </button>
             </div>
-            <p className="text-[10px] text-center mt-4 text-slate-600 font-medium uppercase tracking-widest">
-              Powered by Llama 3.3 & RAG
+            <p className="mt-2.5 text-center text-[11px] text-slate-400">
+              Justelligence · RAG on the Pakistan Penal Code · citation-grounded responses
             </p>
           </form>
+        </footer>
+      )}
+    </div>
+  );
+}
+
+function RetrievedSourcesPanel({ sources }: { sources: PpcSource[] }) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <div className="research-card overflow-hidden rounded-xl">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50/80"
+      >
+        <span>
+          Retrieved PPC sections ({sources.length})
+        </span>
+        <ChevronDown
+          className={cn('h-4 w-4 text-slate-400 transition-transform', open && 'rotate-180')}
+        />
+      </button>
+      {open && (
+        <div className="space-y-2 border-t border-slate-100 px-3 pb-3 pt-1">
+          {sources.map((s) => (
+            <details
+              key={s.id}
+              className="group rounded-lg border border-slate-100 bg-[#F8FAFC] px-3 py-2"
+            >
+              <summary className="cursor-pointer list-none text-xs font-medium text-[#0B1220] [&::-webkit-details-marker]:hidden">
+                <span className="inline-flex flex-wrap items-center gap-2">
+                  {s.section && (
+                    <span className="rounded bg-[#3B82F6]/10 px-1.5 py-0.5 text-[#3B82F6]">
+                      {s.section}
+                    </span>
+                  )}
+                  <span className="text-slate-500">Page ~{s.page}</span>
+                  <ChevronDown className="inline h-3 w-3 text-slate-400 group-open:rotate-180" />
+                </span>
+              </summary>
+              <p className="mt-2 text-xs leading-relaxed text-slate-600">{s.excerpt}…</p>
+            </details>
+          ))}
         </div>
-      </main>
+      )}
     </div>
   );
 }
 
-function KnowledgeItem({ icon, title, active = false }: { icon: React.ReactNode, title: string, active?: boolean }) {
+function BrandWordmark({ className }: { className?: string }) {
   return (
-    <div className={cn(
-      "flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all cursor-pointer group",
-      active ? "bg-blue-600/10 text-blue-400" : "text-slate-500 hover:bg-slate-800/50 hover:text-slate-300"
-    )}>
-      <div className={cn(
-        "p-1.5 rounded-lg transition-colors",
-        active ? "bg-blue-600/20 text-blue-400" : "bg-slate-800 text-slate-500 group-hover:bg-slate-700"
-      )}>
-        {icon}
-      </div>
-      <span className="text-xs font-semibold">{title}</span>
-    </div>
-  );
-}
-
-function SuggestionCard({ title, desc, onClick }: { title: string, desc: string, onClick: () => void }) {
-  return (
-    <div
-      onClick={onClick}
-      className="p-6 rounded-[2rem] bg-slate-900/50 border border-slate-800 hover:border-blue-500/50 hover:bg-slate-800/80 transition-all cursor-pointer text-left group"
+    <span
+      className={cn(
+        'bg-gradient-to-r from-[#0B1220] via-[#1d4ed8] to-[#3B82F6] bg-clip-text text-base font-bold uppercase tracking-[0.12em] text-transparent sm:text-lg',
+        className
+      )}
     >
-      <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
-        <Scale className="w-3.5 h-3.5 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-        {title}
-      </h4>
-      <p className="text-xs text-slate-400 leading-relaxed">{desc}</p>
-    </div>
+      Justelligence
+    </span>
   );
 }
