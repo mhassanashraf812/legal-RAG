@@ -1,52 +1,64 @@
-'use client';
+"use client";
 
-import { useChat } from '@ai-sdk/react';
-import { ChevronDown, RotateCcw, Send } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { isLegalTopicQuestion, OFF_TOPIC_MESSAGE } from '@/lib/legal-topic-guard';
-import { extractCitationBadges } from '@/lib/ppc-sources';
-import { cn } from '@/lib/utils';
-import type { PpcSource } from '@/types/ppc';
+import { useChat } from "@ai-sdk/react";
+import { ChevronDown, RotateCcw, Send } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  isLegalTopicQuestion,
+  OFF_TOPIC_MESSAGE,
+} from "@/lib/legal-topic-guard";
+import { extractCitationBadges } from "@/lib/ppc-sources";
+import { cn } from "@/lib/utils";
+import type { PpcSource } from "@/types/ppc";
 
 const FEATURE_CARDS = [
   {
-    title: 'Retrieve Relevant PPC Sections',
+    title: "Retrieve Relevant PPC Sections",
     description:
-      'Semantic search over the Pakistan Penal Code corpus to surface passages related to your query.',
+      "Semantic search over the Pakistan Penal Code corpus to surface passages related to your query.",
   },
   {
-    title: 'Verify Legal Citations',
+    title: "Verify Legal Citations",
     description:
-      'Section numbers and page references are tied to retrieved text to reduce citation hallucinations.',
+      "Section numbers and page references are tied to retrieved text to reduce citation hallucinations.",
   },
   {
-    title: 'Generate Grounded Responses',
+    title: "Generate Grounded Responses",
     description:
-      'The language model answers only from retrieved PPC context, with explicit source attribution.',
+      "The language model answers only from retrieved PPC context, with explicit source attribution.",
   },
 ];
 
 const EXAMPLE_QUESTIONS = [
-  'What is the punishment under Section 302 PPC?',
-  'Explain theft under Section 378 PPC.',
-  'What constitutes qatl-i-amd?',
+  "What is the punishment under Section 302 PPC?",
+  "Explain theft under Section 378 PPC.",
+  "What constitutes qatl-i-amd?",
 ];
 
 export default function JustelligencePage() {
   const pendingSources = useRef<PpcSource[]>([]);
-  const [sourcesByMessageId, setSourcesByMessageId] = useState<Record<string, PpcSource[]>>({});
-  const [input, setInput] = useState('');
+  const [sourcesByMessageId, setSourcesByMessageId] = useState<
+    Record<string, PpcSource[]>
+  >({});
+  const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { messages = [], setMessages, status, sendMessage } = useChat({
+  const {
+    messages = [],
+    setMessages,
+    status,
+    sendMessage,
+    error,
+    clearError,
+  } = useChat({
     onData: (part) => {
-      if (part.type === 'data-sources' && Array.isArray(part.data)) {
+      if (part.type === "data-sources" && Array.isArray(part.data)) {
         pendingSources.current = part.data as PpcSource[];
       }
     },
     onFinish: ({ message }) => {
-      if (message.role === 'assistant' && pendingSources.current.length > 0) {
+      if (message.role === "assistant" && pendingSources.current.length > 0) {
         setSourcesByMessageId((prev) => ({
           ...prev,
           [message.id]: pendingSources.current,
@@ -56,11 +68,14 @@ export default function JustelligencePage() {
     },
   });
 
-  const isLoading = status === 'submitted' || status === 'streaming';
+  const isLoading = status === "submitted" || status === "streaming";
   const hasChat = messages.length > 0;
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
   }, [messages, isLoading]);
 
   const submitQuery = useCallback(
@@ -71,11 +86,15 @@ export default function JustelligencePage() {
       if (!isLegalTopicQuestion(query)) {
         setMessages((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), role: 'user', parts: [{ type: 'text', text: query }] },
           {
             id: crypto.randomUUID(),
-            role: 'assistant',
-            parts: [{ type: 'text', text: OFF_TOPIC_MESSAGE }],
+            role: "user",
+            parts: [{ type: "text", text: query }],
+          },
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            parts: [{ type: "text", text: OFF_TOPIC_MESSAGE }],
           },
         ]);
         return;
@@ -83,14 +102,14 @@ export default function JustelligencePage() {
 
       await sendMessage({ text: query });
     },
-    [isLoading, sendMessage, setMessages]
+    [isLoading, sendMessage, setMessages],
   );
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     const query = input.trim();
     if (!query) return;
-    setInput('');
+    setInput("");
     await submitQuery(query);
   };
 
@@ -102,9 +121,9 @@ export default function JustelligencePage() {
 
   const messageText = (m: (typeof messages)[0]) =>
     (m.parts || [])
-      .filter((part) => part.type === 'text')
-      .map((part) => ('text' in part ? part.text : ''))
-      .join('') || '';
+      .filter((part) => part.type === "text")
+      .map((part) => ("text" in part ? part.text : ""))
+      .join("") || "";
 
   return (
     <div className="flex h-dvh flex-col bg-[#F8FAFC] text-[#0B1220]">
@@ -138,8 +157,9 @@ export default function JustelligencePage() {
                 </h1>
 
                 <p className="mx-auto mt-4 max-w-lg text-sm leading-relaxed text-slate-600 sm:text-[15px]">
-                  A research prototype designed to reduce citation hallucinations through
-                  retrieval-based grounding and citation verification.
+                  A research prototype designed to reduce citation
+                  hallucinations through retrieval-based grounding and citation
+                  verification.
                 </p>
 
                 <form onSubmit={handleSubmit} className="mt-8">
@@ -148,7 +168,7 @@ export default function JustelligencePage() {
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
+                        if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();
                           handleSubmit();
                         }
@@ -173,9 +193,16 @@ export default function JustelligencePage() {
 
               <section className="mt-14 grid gap-4 sm:grid-cols-3">
                 {FEATURE_CARDS.map((card) => (
-                  <div key={card.title} className="research-card rounded-xl p-5">
-                    <h3 className="text-sm font-semibold text-[#0B1220]">{card.title}</h3>
-                    <p className="mt-2 text-xs leading-relaxed text-slate-500">{card.description}</p>
+                  <div
+                    key={card.title}
+                    className="research-card rounded-xl p-5"
+                  >
+                    <h3 className="text-sm font-semibold text-[#0B1220]">
+                      {card.title}
+                    </h3>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                      {card.description}
+                    </p>
                   </div>
                 ))}
               </section>
@@ -205,7 +232,7 @@ export default function JustelligencePage() {
             <ul className="space-y-8 py-6 sm:py-8">
               {messages.map((m) => (
                 <li key={m.id} className="animate-fade-in">
-                  {m.role === 'user' ? (
+                  {m.role === "user" ? (
                     <div className="flex justify-end">
                       <div className="max-w-[90%] rounded-2xl rounded-tr-sm bg-[#0B1220] px-4 py-3 text-sm leading-relaxed text-white sm:max-w-[85%]">
                         {messageText(m)}
@@ -214,7 +241,9 @@ export default function JustelligencePage() {
                   ) : (
                     <div className="space-y-3">
                       {sourcesByMessageId[m.id]?.length > 0 && (
-                        <RetrievedSourcesPanel sources={sourcesByMessageId[m.id]} />
+                        <RetrievedSourcesPanel
+                          sources={sourcesByMessageId[m.id]}
+                        />
                       )}
 
                       {(() => {
@@ -252,7 +281,24 @@ export default function JustelligencePage() {
                       <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[#3B82F6]" />
                       <span className="typing-dot h-1.5 w-1.5 rounded-full bg-[#3B82F6]" />
                     </span>
-                    <span className="text-sm text-slate-500">Retrieving PPC sections…</span>
+                    <span className="text-sm text-slate-500">
+                      Retrieving PPC sections…
+                    </span>
+                  </div>
+                </li>
+              )}
+
+              {error && (
+                <li className="animate-fade-in">
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    <p>{error.message || "Something went wrong. Please try again."}</p>
+                    <button
+                      type="button"
+                      onClick={() => clearError()}
+                      className="mt-2 text-xs font-medium underline"
+                    >
+                      Dismiss
+                    </button>
                   </div>
                 </li>
               )}
@@ -263,13 +309,16 @@ export default function JustelligencePage() {
 
       {hasChat && (
         <footer className="glass-bar shrink-0 border-t border-slate-200/80 pb-[env(safe-area-inset-bottom)]">
-          <form onSubmit={handleSubmit} className="mx-auto max-w-3xl px-4 py-4 sm:px-6">
+          <form
+            onSubmit={handleSubmit}
+            className="mx-auto max-w-3xl px-4 py-4 sm:px-6"
+          >
             <div className="research-input flex items-end gap-2 rounded-2xl border border-slate-200 bg-white p-2 transition-shadow">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     handleSubmit();
                   }
@@ -287,7 +336,8 @@ export default function JustelligencePage() {
               </button>
             </div>
             <p className="mt-2.5 text-center text-[11px] text-slate-400">
-              Justelligence · RAG on the Pakistan Penal Code · citation-grounded responses
+              Justelligence · RAG on the Pakistan Penal Code · citation-grounded
+              responses
             </p>
           </form>
         </footer>
@@ -306,11 +356,12 @@ function RetrievedSourcesPanel({ sources }: { sources: PpcSource[] }) {
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between px-4 py-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50/80"
       >
-        <span>
-          Retrieved PPC sections ({sources.length})
-        </span>
+        <span>Retrieved PPC sections ({sources.length})</span>
         <ChevronDown
-          className={cn('h-4 w-4 text-slate-400 transition-transform', open && 'rotate-180')}
+          className={cn(
+            "h-4 w-4 text-slate-400 transition-transform",
+            open && "rotate-180",
+          )}
         />
       </button>
       {open && (
@@ -331,7 +382,9 @@ function RetrievedSourcesPanel({ sources }: { sources: PpcSource[] }) {
                   <ChevronDown className="inline h-3 w-3 text-slate-400 group-open:rotate-180" />
                 </span>
               </summary>
-              <p className="mt-2 text-xs leading-relaxed text-slate-600">{s.excerpt}…</p>
+              <p className="mt-2 text-xs leading-relaxed text-slate-600">
+                {s.excerpt}…
+              </p>
             </details>
           ))}
         </div>
@@ -344,8 +397,8 @@ function BrandWordmark({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        'bg-gradient-to-r from-[#0B1220] via-[#1d4ed8] to-[#3B82F6] bg-clip-text text-base font-bold uppercase tracking-[0.12em] text-transparent sm:text-lg',
-        className
+        "bg-gradient-to-r from-[#0B1220] via-[#1d4ed8] to-[#3B82F6] bg-clip-text text-base font-bold uppercase tracking-[0.12em] text-transparent sm:text-lg",
+        className,
       )}
     >
       Justelligence

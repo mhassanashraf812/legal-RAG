@@ -1,30 +1,34 @@
-const fs = require('fs');
-const path = require('path');
-const pdfParse = require('pdf-parse');
+const fs = require("fs");
+const path = require("path");
+const pdfParse = require("pdf-parse");
 
-const PDF_PATH = path.join(__dirname, '../../Pakistan Penal Code.pdf');
-const OUTPUT_DIR = path.join(__dirname, '../src/data');
-const OUTPUT_PATH = path.join(OUTPUT_DIR, 'ppc-chunks.json');
+const PDF_PATH = path.join(__dirname, "../../Pakistan Penal Code.pdf");
+const OUTPUT_DIR = path.join(__dirname, "../src/data");
+const OUTPUT_PATH = path.join(OUTPUT_DIR, "ppc-chunks.json");
 
 const CHUNK_SIZE = 1500;
 const CHUNK_OVERLAP = 200;
 
 async function main() {
-  console.log('📖 Reading Pakistan Penal Code PDF...');
+  console.log(" Reading Pakistan Penal Code PDF...");
   const pdfBuffer = fs.readFileSync(PDF_PATH);
 
-  console.log('🔍 Parsing PDF text...');
+  console.log(" Parsing PDF text...");
   const data = await pdfParse(pdfBuffer);
 
   const fullText = data.text;
   const totalPages = data.numpages;
-  console.log(`✅ Extracted ${fullText.length} characters from ${totalPages} pages.`);
+  console.log(
+    ` Extracted ${fullText.length} characters from ${totalPages} pages.`,
+  );
 
   if (fullText.length < 100) {
-    throw new Error('❌ Could not extract text. The PDF may be image-based/scanned.');
+    throw new Error(
+      " Could not extract text. The PDF may be image-based/scanned.",
+    );
   }
 
-  console.log('\n✂️  Chunking text...');
+  console.log("\n  Chunking text...");
 
   const chunks = [];
   let start = 0;
@@ -39,7 +43,7 @@ async function main() {
         id: `ppc-chunk-${chunkIndex}`,
         text: chunk,
         page: Math.ceil((start / fullText.length) * totalPages),
-        source: 'Pakistan Penal Code'
+        source: "Pakistan Penal Code",
       });
       chunkIndex++;
     }
@@ -47,7 +51,7 @@ async function main() {
     start += CHUNK_SIZE - CHUNK_OVERLAP;
   }
 
-  console.log(`✅ Created ${chunks.length} chunks.`);
+  console.log(`Created ${chunks.length} chunks.`);
 
   if (!fs.existsSync(OUTPUT_DIR)) {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -55,20 +59,22 @@ async function main() {
 
   const output = {
     metadata: {
-      source: 'Pakistan Penal Code',
+      source: "Pakistan Penal Code",
       totalPages,
       totalChunks: chunks.length,
       chunkSize: CHUNK_SIZE,
       chunkOverlap: CHUNK_OVERLAP,
-      processedAt: new Date().toISOString()
+      processedAt: new Date().toISOString(),
     },
-    chunks
+    chunks,
   };
 
   fs.writeFileSync(OUTPUT_PATH, JSON.stringify(output, null, 2));
 
-  console.log(`\n🎉 Done! Saved ${chunks.length} chunks to:\n   ${OUTPUT_PATH}`);
-  console.log('\n📊 Summary:');
+  console.log(
+    `\n🎉 Done! Saved ${chunks.length} chunks to:\n   ${OUTPUT_PATH}`,
+  );
+  console.log("\n📊 Summary:");
   console.log(`   Source : Pakistan Penal Code PDF`);
   console.log(`   Pages  : ${totalPages}`);
   console.log(`   Chunks : ${chunks.length}`);

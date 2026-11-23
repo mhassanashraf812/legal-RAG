@@ -1,10 +1,10 @@
-import { streamText } from 'ai';
-import { createGroq } from '@ai-sdk/groq';
-import { assessRagCoverage, searchPPC } from '@/lib/ppc-search';
-import { buildRagInstructions } from '@/lib/rag-prompt';
-import { NextResponse } from 'next/server';
+import { streamText } from "ai";
+import { createGroq } from "@ai-sdk/groq";
+import { assessRagCoverage, searchPPC } from "@/lib/ppc-search";
+import { buildRagInstructions } from "@/lib/rag-prompt";
+import { NextResponse } from "next/server";
 
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
 
 const groq = createGroq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -20,17 +20,20 @@ const groq = createGroq({ apiKey: process.env.GROQ_API_KEY });
 export async function POST(req: Request) {
   try {
     // --- Optional: API Key Authentication ---
-    const apiKey = req.headers.get('x-api-key');
+    const apiKey = req.headers.get("x-api-key");
     const validKey = process.env.SEARCH_API_KEY;
     if (validKey && apiKey !== validKey) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json();
-    const query: string = body?.query || '';
+    const query: string = body?.query || "";
 
     if (!query || query.trim().length < 2) {
-      return NextResponse.json({ error: 'Query is required.' }, { status: 400 });
+      return NextResponse.json(
+        { error: "Query is required." },
+        { status: 400 },
+      );
     }
 
     const results = searchPPC(query, 5);
@@ -38,35 +41,36 @@ export async function POST(req: Request) {
 
     if (!coverage.inBook) {
       return NextResponse.json({
-        answer: 'Not found in the PPC book (RAG). No matching passage was retrieved.',
+        answer:
+          "Not found in the PPC book (RAG). No matching passage was retrieved.",
         sources: [],
       });
     }
 
     const context = results
       .map((r) => `[PPC — Page ~${r.page}]\n${r.text}`)
-      .join('\n\n---\n\n');
+      .join("\n\n---\n\n");
 
     const result = streamText({
-      model: groq('llama-3.3-70b-versatile'),
+      model: groq("openai/gpt-oss-120b"),
       system: `${buildRagInstructions(coverage, results)}\n\nRetrieved passages:\n${context}`,
-      messages: [{ role: 'user', content: query }],
+      messages: [{ role: "user", content: query }],
       temperature: 0,
     });
 
     // Add CORS headers so any project can call this API
     return result.toUIMessageStreamResponse({
       headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, x-api-key',
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, x-api-key",
       },
     });
   } catch (error) {
-    console.error('Search API Error:', error);
+    console.error("Search API Error:", error);
     return NextResponse.json(
-      { error: 'Internal Server Error', details: String(error) },
-      { status: 500 }
+      { error: "Internal Server Error", details: String(error) },
+      { status: 500 },
     );
   }
 }
@@ -76,9 +80,9 @@ export async function OPTIONS() {
   return new Response(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, x-api-key',
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, x-api-key",
     },
   });
 }

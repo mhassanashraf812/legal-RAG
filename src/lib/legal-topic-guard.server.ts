@@ -21,7 +21,7 @@ export async function validateLegalTopic(query: string): Promise<boolean> {
 
   try {
     const { text: verdict } = await generateText({
-      model: groq('llama-3.1-8b-instant'),
+      model: groq('openai/gpt-oss-20b'),
       system: `You classify questions for a Pakistan Penal Code (PPC) RAG assistant.
 Reply YES only if the question is about crimes, offences, punishments, or sections under the Pakistan Penal Code.
 Reply NO for service law, constitutional articles, civil procedure, general chat, or non-penal topics.`,
